@@ -1,0 +1,7 @@
+SELECT
+	TOKEN_COEF.su_input_cost AS INPUT_COST
+	, TOKEN_COEF.su_output_cost AS OUTPUT_COST
+FROM
+	AIB_M_TOKEN_COEF TOKEN_COEF
+WHERE
+	TOKEN_COEF.nm_ai_model = %s;
