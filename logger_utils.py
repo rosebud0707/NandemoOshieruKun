@@ -13,6 +13,8 @@ class Logger:
     """
     def __init__(self, config):
         """コンストラクタ
+            Args:
+                config:外部設定ファイル
         """
         self.save_dir = config.file_save_dir
         self.log_file_nm_base = config.file_nm_base

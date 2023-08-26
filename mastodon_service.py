@@ -4,6 +4,7 @@
 import asyncio
 import dataclasses
 from datetime import datetime, timedelta
+import re
 
 from bs4 import BeautifulSoup 
 from mastodon import Mastodon, StreamListener
@@ -19,6 +20,7 @@ class NotifiEntity:
     """データエンティティ
         notificationの内容保持用エンティティクラス
     """
+    noti: dict
     visibility: str
     cn_mention: int
     id : str
@@ -87,59 +89,27 @@ class Stream(StreamListener):
                     visibility_status = self.config.visibility_unlisted
 
                 # 返信要件チェック
-                if self.__check_validation(notifi_entity) == True:
-                    # コスト取得
-                    self.api_cost = self.__get_api_cost()
+                if self.__check_validation(notifi_entity, visibility_status):
+                    # 正常処理
+                    now = datetime.now()
 
-                    if len(str(notifi_entity.content)) == 0: 
-                        # 未入力チェック
-                        self.logger.warning("質問未入力")
-                        self.mastodon.status_reply(notif['status'] , '質問内容を入力してください。', notifi_entity.id, visibility = visibility_status)
-                    elif(self.api_cost > float(self.config.cost_limit)):
-                        # コストチェック
-                        self.logger.warning("コスト超過")
-                        self.mastodon.status_reply(notif['status'] , '本日の営業は終了しました。明日の利用をお願いいたします。', notifi_entity.id, visibility = visibility_status)
-                    else:
-                        # 正常処理
-                        now = datetime.now()
-                        # 質問文登録
-                        self.__regist_question(notifi_entity.id, now, notifi_entity.content)
+                    # 質問文登録
+                    self.__regist_question(notifi_entity.id, now, notifi_entity.content)
 
-                        self.logger.info('@' + str(notifi_entity.id) + "さんへ返信処理開始")
-                        content = "こんにちは。" + notifi_entity.content
-                        self.logger.info("質問文:" + str(content))
+                    self.logger.info('@' + str(notifi_entity.id) + "さんへ返信処理開始")
+                    content = "こんにちは。" + notifi_entity.content
+                    self.logger.info("質問文:" + str(content))
 
-                        generateToots = GenerateToots()
-                        loop = asyncio.get_event_loop()
-                        res = loop.run_until_complete((generateToots.process_wait(content, notifi_entity.id))) # 回答文生成
+                    # 回答文生成
+                    generateToots = GenerateToots()
+                    loop = asyncio.get_event_loop()
+                    res = loop.run_until_complete((generateToots.process_wait(content, notifi_entity.id)))
 
-                        self.__do_toot(res, notifi_entity.id, notif['status'], visibility_status) # トゥート
+                    self.__do_toot(res, notifi_entity, visibility_status)
 
         except Exception as e:
             self.logger.critical("通知の受信に関して、エラーが発生しました。" + str(e))
-    
-    def __get_api_cost(self):
-        """APIコスト取得
-            実行日のAPIコストを取得する。
-            Return:
-                APIコスト数
-        """
-        try:
-            # DatabaseManagerインスタンス化
-            dbmanager_instance = DatabaseManager(self.config, "SQL_001.sql")
-            # SQL実行
-            dr = dbmanager_instance.exec_select()
-
-            if dr['API_COST'] is None or len(dr['API_COST']) == 0:
-                api_cost = 0
-            else:
-                api_cost = float(dr['API_COST'])
         
-            return api_cost
-        except Exception as e:
-            self.logger.critical("APIコスト取得処理で、エラーが発生しました。" + str(e))
-            raise e
-    
     def __set_notification(self, notif):
         """通知内容のうち処理に必要な項目をデータクラスに設定する
             Args:
@@ -149,6 +119,7 @@ class Stream(StreamListener):
         """
         try:
             return NotifiEntity(
+                                noti = notif['status'], # status
                                 visibility = str(notif['status']['visibility']), # visivility
                                 cn_mention = len(notif['status']['mentions']), # mentionに含まれるアカウント数
                                 id = str(notif['status']['account']['username']), # id
@@ -178,32 +149,26 @@ class Stream(StreamListener):
 
             html_data = BeautifulSoup(content_raw, "html.parser")
 
-            links = html_data.find_all("a") # リンクを抽出
-
-            # URLを連結する
-            content_links = ""
-            if len(links) > 1:
-                for i in range(1, len(links)):
-                    content_links += links[i].get("href") + ' '
-
             # リプライ本文を抜き出す
-            if html_data.find("span").text == None:
-                content = ""
-            else:
-                content = html_data.find("span").text
+            content = ""
+            if html_data.find("span") != None:
+                con = html_data.find_all("span")
+                for c in con:
+                    content += c.get_text()
             
-            # リプライ本文とURLを結合する
-            return content + content_links
+            # リプライ本文返却
+            return content
         
         except Exception as e:
             self.logger.critical("質問文編集処理で、エラーが発生しました。" + str(e))
             raise e
                 
-    def __check_validation(self, notifi_entity):
+    def __check_validation(self, notifi_entity, visibility_status):
         '''バリデーションチェック
             受信した通知が返信要件をみたいしているかを確認
             Args:
                 notifi_entity:受信した通知内容
+                visibility_status:botの返信時visibility
             Returns:
                 True:チェックOK
                 False:チェックNG
@@ -211,23 +176,99 @@ class Stream(StreamListener):
         try:
             self.logger.info("バリデーションチェック")
 
-            # インスタンスチェック 他インスタンスへは返信を行わない。
-            if notifi_entity.uri in self.config.permission_server:
+            # 質問者にエラー内容を返答しない種類のバリデーションチェック。
+            regex_pattern = "|".join(self.config.permission_server)
+            if re.match(regex_pattern, notifi_entity.uri) is None:
+                # インスタンスチェック 他インスタンスへは返信を行わない。
                 self.logger.warning("許可外サーバーからのリプライです。")
                 return False
-                # 質問者以外のアカウントへのリプライ防止
+
             elif notifi_entity.cn_mention > 1:
+                # 質問者以外のアカウントへのリプライ防止
                 self.logger.warning("複数アカウントの検知。")
                 return False
-            # 投稿間隔チェック
-            elif self.__check_receive_interval(notifi_entity.id) == False:
+            
+            elif not self.__check_receive_interval(notifi_entity.id):
+                # 投稿間隔チェック
                 self.logger.warning("投稿間隔が短いです。")
                 return False
+
+
+            # 質問者にエラー内容を返答する種類のバリデーションチェック。
+            # コスト取得
+            self.api_cost = self.__get_api_cost()
+
+            if len(str(notifi_entity.content).replace(' ', '')) == 0: 
+                # 未入力チェック
+                self.logger.warning("質問未入力")
+                self.mastodon.status_reply(notifi_entity.noti, '質問内容を入力してください。', notifi_entity.id, visibility = visibility_status)
+
+            elif(self.api_cost > float(self.config.cost_limit)):
+                # コストチェック
+                self.logger.warning("コスト超過")
+                self.mastodon.status_reply(notifi_entity.noti, '本日の営業は終了しました。明日の利用をお願いいたします。', notifi_entity.id, visibility = visibility_status)
+
+            elif self.__check_include_url(notifi_entity.content_raw):
+                # URLチェック
+                self.logger.warning("URLを含む投稿")
+                self.mastodon.status_reply(notifi_entity.noti, '質問文にURLが含まれています。URLを削除して再度投稿してくだいさい。', notifi_entity.id, visibility = visibility_status)
+
             else:
                 return True
 
         except Exception as e:
             self.logger.critical("バリデーションチェックで、エラーが発生しました。" + str(e))
+            raise e        
+
+    def __get_api_cost(self):
+        """APIコスト取得
+            実行日のAPIコストを取得する。
+            Return:
+                APIコスト数
+        """
+        try:
+            # DatabaseManagerインスタンス化
+            dbmanager_instance = DatabaseManager(self.config, "SQL_001.sql")
+            # SQL実行
+            dr = dbmanager_instance.exec_select()
+
+            if dr['API_COST'] is None or len(dr['API_COST']) == 0:
+                api_cost = 0
+            else:
+                api_cost = float(dr['API_COST'])
+        
+            return api_cost
+        except Exception as e:
+            self.logger.critical("APIコスト取得処理で、エラーが発生しました。" + str(e))
+            raise e
+
+    def __check_include_url(self, content_raw):
+        '''URLチェック
+            URLリンクが質問文に含まれる場合は返信を行わない。
+            Args:
+                content_raw:HTML情報を含んだ通知情報
+            Returns:
+                True:チェックOK
+                False:チェックNG
+        '''
+        try:
+            content_raw = str(content_raw).replace("<br>", " ")
+            content_raw = str(content_raw).replace("</br>", " ")
+            content_raw = str(content_raw).replace("<br />", " ")
+
+            html_data = BeautifulSoup(content_raw, "html.parser")
+
+            # リンクを抽出
+            links = html_data.find_all("a")
+
+            # URL検知
+            if len(links) > 1:
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            self.logger.critical("リンクチェックで、エラーが発生しました。" + str(e))
             raise e        
 
     def __check_receive_interval(self, id):
@@ -281,14 +322,13 @@ class Stream(StreamListener):
             self.logger.critical("DB登録に関して、エラーが発生しました。" + str(e))
             raise e
 
-    def __do_toot(self, response, id, st, visibility_param):
+    def __do_toot(self, response, notifi_entity, visibility_param):
         """トゥート処理
             生成文書を編集し、トゥートする。
             Args:
                 response:生成文
-                id:Mastodon User ID
-                st:status
-                visibility_param:visibility
+                notifi_entity:通知情報保持データエンティティ
+                visibility_param:返信時のvisibility
         """
         try:
             if response == 'None':
@@ -300,21 +340,21 @@ class Stream(StreamListener):
             response = str(response).replace('@', '＠')
 
             self.logger.info("トゥート")
-            if len('@' + id + ' ' + response) > 500:  # トゥート上限エラー回避。
-                length = len('@' + id + ' ' + response)
+            if len('@' + notifi_entity.id + ' ' + response) > 500:  # トゥート上限エラー回避。
+                length = len('@' + notifi_entity.id + ' ' + response)
                 splitLine =  [response[i:i+450] for i in range(0, length, 450)]
 
                 for num in range(len(splitLine)):
                     # 返信
-                    self.mastodon.status_reply(st,
+                    self.mastodon.status_reply(notifi_entity.noti,
                                 str(splitLine[num]),
-                                id,
+                                notifi_entity.id,
                                 visibility = visibility_param)
             else:
                 # 返信
-                self.mastodon.status_reply(st,
+                self.mastodon.status_reply(notifi_entity.noti,
                         str(response),
-                        id,
+                        notifi_entity.id,
                         visibility = visibility_param)
                 
         except Exception as e:
