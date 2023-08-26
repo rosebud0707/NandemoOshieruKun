@@ -1,4 +1,4 @@
-"""MastodonService.py
+"""mastodon_service.py
     Mastodonに関連する処理
 """
 import asyncio
@@ -66,10 +66,6 @@ class Stream(StreamListener):
         self.logger = logger
         self.mastodon = mastodon
         self.config = config
-        # APIコストの取得
-        self.api_cost = self.__get_api_cost()
-
-        self.generateToots = GenerateToots(self.api_cost)
 
     def on_notification(self, notif):
         """通知受信処理
@@ -81,20 +77,20 @@ class Stream(StreamListener):
             if notif['type'] == 'mention':
                 self.logger.info("mentionの検知")
 
-                # コスト再取得
-                self.api_cost = self.__get_api_cost()
+                # 受け取った通知内容のセット
+                notifi_entity = self.__set_notification(notif)
                 
-                # notifiの設定
-                notifi_entity = self.set_notification(notif)
-
                 # 公開範囲設定。directでリプライされた際はdirectで、それ以外はunlistedで返答を行う。
                 if notifi_entity.visibility == 'direct':
                     visibility_status = self.config.visibility_direct
                 else:
                     visibility_status = self.config.visibility_unlisted
 
-                if self.check_validation(notifi_entity) == True:
-                    # 規定チェック
+                # 返信要件チェック
+                if self.__check_validation(notifi_entity) == True:
+                    # コスト取得
+                    self.api_cost = self.__get_api_cost()
+
                     if len(str(notifi_entity.content)) == 0: 
                         # 未入力チェック
                         self.logger.warning("質問未入力")
@@ -107,16 +103,17 @@ class Stream(StreamListener):
                         # 正常処理
                         now = datetime.now()
                         # 質問文登録
-                        self.regist_question(notifi_entity.id, now, notifi_entity.content)
+                        self.__regist_question(notifi_entity.id, now, notifi_entity.content)
 
                         self.logger.info('@' + str(notifi_entity.id) + "さんへ返信処理開始")
                         content = "こんにちは。" + notifi_entity.content
                         self.logger.info("質問文:" + str(content))
 
+                        generateToots = GenerateToots()
                         loop = asyncio.get_event_loop()
-                        res = loop.run_until_complete((self.generateToots.process_wait(content, notifi_entity.id, now))) # 回答文生成
+                        res = loop.run_until_complete((generateToots.process_wait(content, notifi_entity.id))) # 回答文生成
 
-                        self.do_toot(res, notifi_entity.id, notif['status'], visibility_status) # トゥート
+                        self.__do_toot(res, notifi_entity.id, notif['status'], visibility_status) # トゥート
 
         except Exception as e:
             self.logger.critical("通知の受信に関して、エラーが発生しました。" + str(e))
@@ -127,33 +124,43 @@ class Stream(StreamListener):
             Return:
                 APIコスト数
         """
-        # DatabaseManagerインスタンス化
-        dbmanager_instance = DatabaseManager(self.config, "SQL_001.sql")
-        # SQL実行
-        dr = dbmanager_instance.exec_select()
+        try:
+            # DatabaseManagerインスタンス化
+            dbmanager_instance = DatabaseManager(self.config, "SQL_001.sql")
+            # SQL実行
+            dr = dbmanager_instance.exec_select()
 
-        if dr['API_COST'] is None or len(dr['API_COST']) == 0:
-            api_cost = 0
-        else:
-            api_cost = float(dr['API_COST'])
+            if dr['API_COST'] is None or len(dr['API_COST']) == 0:
+                api_cost = 0
+            else:
+                api_cost = float(dr['API_COST'])
         
-        return api_cost
+            return api_cost
+        except Exception as e:
+            self.logger.critical("APIコスト取得処理で、エラーが発生しました。" + str(e))
+            raise e
     
-    def set_notification(self, notif):
-        """通知内容をデータクラスに設定する
+    def __set_notification(self, notif):
+        """通知内容のうち処理に必要な項目をデータクラスに設定する
             Args:
                 notif:通知
+            Returns:
+                NotifiEntity
         """
-        return NotifiEntity(
-                            visibility = str(notif['status']['visibility']), # visivility
-                            cn_mention = len(notif['status']['mentions']), # mentionに含まれるアカウント数
-                            id = str(notif['status']['account']['username']), # id
-                            uri = str(notif['status']['uri']), # ユーザのインスタンスURI
-                            content_raw = str(notif['status']['content']), # リプライ内容
-                            content = str(self.edit_content(str(notif['status']['content']))) # 質問文の編集                         
-        )
-
-    def edit_content(self, content_raw):
+        try:
+            return NotifiEntity(
+                                visibility = str(notif['status']['visibility']), # visivility
+                                cn_mention = len(notif['status']['mentions']), # mentionに含まれるアカウント数
+                                id = str(notif['status']['account']['username']), # id
+                                uri = str(notif['status']['uri']), # ユーザのインスタンスURI
+                                content_raw = str(notif['status']['content']), # リプライ内容
+                                content = str(self.__edit_content(str(notif['status']['content']))) # 質問文の編集                         
+            )
+        except Exception as e:
+            self.logger.critical("NotifiEntity設定時にエラーが発生しました。" + str(e))
+            raise e
+        
+    def __edit_content(self, content_raw):
         '''質問内容編集
             取り出したリプライの情報より、質問文を編集する。
             Args:
@@ -190,33 +197,50 @@ class Stream(StreamListener):
         
         except Exception as e:
             self.logger.critical("質問文編集処理で、エラーが発生しました。" + str(e))
+            raise e
                 
-    def check_validation(self, notifi_entity):
-        self.logger.info("バリデーションチェック")
-
-        # インスタンスチェック 他インスタンスへは返信を行わない。
-        if notifi_entity.uri in self.config.permission_server:
-            self.logger.warning("別インスタンスからのリプライ")
-            return False
-            # 質問者以外のアカウントへのリプライ防止
-        elif notifi_entity.cn_mention > 1:
-            self.logger.warning("複数アカウント検知")
-            return False
-        # 投稿間隔チェック
-        elif self.check_receive_interval(notifi_entity.id) == False:
-            self.logger.warning("投稿間隔が短いです。")
-            return False
-        else:
-            return True
-
-    def check_receive_interval(self, id):
-        '''投稿間隔チェック
-            同一IDより規定時間以内に再度投稿されたかを確認する。規定時間以内の場合は処理を行わない。
+    def __check_validation(self, notifi_entity):
+        '''バリデーションチェック
+            受信した通知が返信要件をみたいしているかを確認
+            Args:
+                notifi_entity:受信した通知内容
             Returns:
-                True:規定時間外
-                False:規定時間内または処理失敗
+                True:チェックOK
+                False:チェックNG
         '''
         try:
+            self.logger.info("バリデーションチェック")
+
+            # インスタンスチェック 他インスタンスへは返信を行わない。
+            if notifi_entity.uri in self.config.permission_server:
+                self.logger.warning("許可外サーバーからのリプライです。")
+                return False
+                # 質問者以外のアカウントへのリプライ防止
+            elif notifi_entity.cn_mention > 1:
+                self.logger.warning("複数アカウントの検知。")
+                return False
+            # 投稿間隔チェック
+            elif self.__check_receive_interval(notifi_entity.id) == False:
+                self.logger.warning("投稿間隔が短いです。")
+                return False
+            else:
+                return True
+
+        except Exception as e:
+            self.logger.critical("バリデーションチェックで、エラーが発生しました。" + str(e))
+            raise e        
+
+    def __check_receive_interval(self, id):
+        '''投稿間隔チェック
+            同一IDより規定時間以内に再度投稿されたかを確認する。規定時間以内の場合は処理を行わない。
+            Args:
+                id:アカウントID
+            Returns:
+                True:チェックOK
+                False:チェックNG
+        '''
+        try:
+            self.logger.info("投稿間隔チェック")
             # DatabaseManagerインスタンス化
             dbmanager_instance = DatabaseManager(self.config, "SQL_002.sql")
             # SQL実行
@@ -229,18 +253,17 @@ class Stream(StreamListener):
                 return True
             else:
                 if datetime.now() > dt_recent + timedelta(seconds = int(self.config.receive_interval)):
-                    # 規定時間を超過していた場合
+                    # 規定間隔を超過していた場合
                     return True
                 else:
-                    # 規定時間内の場合
+                    # 規定間隔内の場合
                     return False
-
 
         except Exception as e:
             self.logger.critical("投稿間隔チェックで、エラーが発生しました。" + str(e))
-            return False
+            raise e
 
-    def regist_question(self, id, ts, content):
+    def __regist_question(self, id, ts, content):
         '''質問登録
             質問をDB上に登録する。
             Args:
@@ -256,9 +279,9 @@ class Stream(StreamListener):
         
         except Exception as e:
             self.logger.critical("DB登録に関して、エラーが発生しました。" + str(e))
+            raise e
 
-    
-    def do_toot(self, response, id, st, visibility_param):
+    def __do_toot(self, response, id, st, visibility_param):
         """トゥート処理
             生成文書を編集し、トゥートする。
             Args:
@@ -273,7 +296,7 @@ class Stream(StreamListener):
                 self.mastodon.status_post('予期せぬエラーの発生。強制終了します。', visibility = 'unlisted')
                 exit()
 
-            # リプライの防止
+            # 予期せぬリプライの防止
             response = str(response).replace('@', '＠')
 
             self.logger.info("トゥート")
@@ -288,6 +311,7 @@ class Stream(StreamListener):
                                 id,
                                 visibility = visibility_param)
             else:
+                # 返信
                 self.mastodon.status_reply(st,
                         str(response),
                         id,
@@ -295,3 +319,4 @@ class Stream(StreamListener):
                 
         except Exception as e:
             self.logger.critical("トゥート処理にて、エラーが発生しました。" + str(e))
+            raise e
