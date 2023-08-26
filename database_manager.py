@@ -21,7 +21,8 @@ class DatabaseManager:
         self.connection = MySQLdb.connect(host="localhost",port=3306,
                                           user=conf.user,
                                           passwd=conf.password,
-                                          db=conf.dbname
+                                          db=conf.dbname,
+                                          charset="utf8"
                                           )
         self.cursor = self.connection.cursor()
         with open(os.path.dirname(os.path.abspath(__file__)) + conf.sql_file_dir + '/' +  sqlfile, "r") as file:
