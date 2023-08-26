@@ -14,6 +14,9 @@ class DatabaseManager:
     """
     def __init__(self, conf, sqlfile):
         """コンストラクタ
+            Args:
+                conf:外部設定ファイル
+                sqlfile:実行SQLクエリファイル
         """
         self.connection = MySQLdb.connect(host="localhost",port=3306,
                                           user=conf.user,
@@ -26,6 +29,8 @@ class DatabaseManager:
 
     def exec_select(self, *args):
         """SELECT実行メソッド
+            Args:
+                args:SQLパラメータ
             Return:
                 実行結果
         """
@@ -38,6 +43,8 @@ class DatabaseManager:
 
     def exec_query(self, *args):
         """INSERT/UPDATE/DELETE実行メソッド
+            Args:
+                args:SQLパラメータ
             Return:
                 処理件数
         """
