@@ -1,1 +1,3 @@
-*.ini
+Config.ini
+lottery.txt
+./Log/*.Log

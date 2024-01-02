@@ -4,6 +4,7 @@
 import asyncio
 import dataclasses
 from datetime import datetime, timedelta
+import random
 import re
 
 from bs4 import BeautifulSoup 
@@ -212,7 +213,13 @@ class Stream(StreamListener):
             elif(self.api_cost > float(self.config.cost_limit)):
                 # コストチェック
                 self.logger.warning("コスト超過")
-                self.mastodon.status_reply(notifi_entity.noti, '本日の営業は終了しました。明日の利用をお願いいたします。', notifi_entity.id, visibility = visibility_status)
+                if 'おみくじ' in notifi_entity.content:
+                    self.mastodon.status_reply(notifi_entity.noti, self.__lottery(), notifi_entity.id, visibility = visibility_status)
+
+                else:
+                    # コスト超過時告知文
+                    self.mastodon.status_reply(notifi_entity.noti, '今日はもうちょっと疲れたから、質問に答えるのはしんどいわ。でもおみくじやったらできるで。「おみくじ」って話しかけてや。',\
+                                            notifi_entity.id, visibility = visibility_status)
 
             elif self.__check_include_url(notifi_entity.content_raw):
                 # URLチェック
@@ -366,3 +373,21 @@ class Stream(StreamListener):
         except Exception as e:
             self.logger.critical("トゥート処理にて、エラーが発生しました。" + str(e))
             raise e
+        
+    def __lottery(self):
+        '''おみくじ
+            Returns:
+                result:結果
+        '''
+        result = ''
+        lines = ''
+
+        lineCnt = len(open(self.config.lottery_path).readlines())
+
+        linePos = random.randint(1, lineCnt);
+
+        with open(self.config.lottery_path, "r") as f:
+            lines = f.read().splitlines()
+        
+        result = lines[linePos]
+        return result

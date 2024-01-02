@@ -37,6 +37,7 @@ class ConfigFileEntity:
     chatgpt_model: str
     temperature: float
     role_system_content: str
+    lottery_path: str
 
 class SetConfigFileData:
     """外部設定ファイル設定
@@ -79,6 +80,7 @@ class SetConfigFileData:
                                     chatgpt_model = str(self.config['chatGPTSetting']['chatgpt_model']),
                                     temperature = str(self.config['chatGPTSetting']['temperature']),
                                     role_system_content = str(self.config['chatGPTSetting']['role_system_content']),
+                                    lottery_path = str(self.config['EasterEgg']['lottery_path']),
                                     )
 
         except Exception as e:
