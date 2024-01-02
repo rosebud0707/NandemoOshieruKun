@@ -213,27 +213,13 @@ class Stream(StreamListener):
             elif(self.api_cost > float(self.config.cost_limit)):
                 # コストチェック
                 self.logger.warning("コスト超過")
-                # イースターエッグ UPD START
-                # self.mastodon.status_reply(notifi_entity.noti, '本日の営業は終了しました。明日の利用をお願いいたします。', notifi_entity.id, visibility = visibility_status)
-                if ('グー' in notifi_entity.content) + ('パー' in notifi_entity.content) + ('チョキ' in notifi_entity.content) + ('おみくじ' in notifi_entity.content) == 1:
-                    # 正常
-                    if 'おみくじ' in notifi_entity.content:
-                        self.mastodon.status_reply(notifi_entity.noti, self.__lottery(), notifi_entity.id, visibility = visibility_status)
-                    else:
-                        self.mastodon.status_reply(notifi_entity.noti, self.__rpc(notifi_entity.content), notifi_entity.id, visibility = visibility_status)
-                elif ('グー' in notifi_entity.content or 'パー' in notifi_entity.content or 'チョキ' in notifi_entity.content) and 'おみくじ' in notifi_entity.content:
-                    # じゃんけんとおみくじ重複
-                    self.mastodon.status_reply(notifi_entity.noti, 'おいおい、どっちもやってくれって言うなんて、図々しいやつやなあ。一つでもやってやるのに、なんでゴネるんや。エエ加減にしてほしわ。じゃんけんか、おみくじか、どっちかに決めて早く言ってくれや。キツいで、言っとくけど、もう一回言うたらあきませんで。そんなん言うたら、私もイライラしまっせ。段取りが大事やで、時間の無駄やし、言うたことに対応せなあかんのも大変やからな。まずは一つに絞って考えるようにせんかい。',\
-                                            notifi_entity.id, visibility = visibility_status)                    
-                elif 'グー' in notifi_entity.content or 'パー' in notifi_entity.content or 'チョキ' in notifi_entity.content:
-                    # じゃんけん重複
-                    self.mastodon.status_reply(notifi_entity.noti, 'おいおい、いっぺんに沢山手出すなんて、あんたはちょっとトリッキーなやつやな。なかなかの手品師やで。でもな、俺は見破るで。次は俺が勝つんやで、覚えときな。エエ加減にしてほしわ。',\
-                                            notifi_entity.id, visibility = visibility_status)
+                if 'おみくじ' in notifi_entity.content:
+                    self.mastodon.status_reply(notifi_entity.noti, self.__lottery(), notifi_entity.id, visibility = visibility_status)
+
                 else:
                     # コスト超過時告知文
-                    self.mastodon.status_reply(notifi_entity.noti, '今日はもうちょっと疲れたから、質問に答えるのはしんどいわ。でもジャンケンかおみくじやったらできるで。じゃんけんやったら「グー」「チョキ」「パー」、おみくじがエエなら「おみくじ」って話しかけてや。',\
+                    self.mastodon.status_reply(notifi_entity.noti, '今日はもうちょっと疲れたから、質問に答えるのはしんどいわ。でもおみくじやったらできるで。「おみくじ」って話しかけてや。',\
                                             notifi_entity.id, visibility = visibility_status)
-                # イースターエッグ UPD END
 
             elif self.__check_include_url(notifi_entity.content_raw):
                 # URLチェック
@@ -388,42 +374,6 @@ class Stream(StreamListener):
             self.logger.critical("トゥート処理にて、エラーが発生しました。" + str(e))
             raise e
         
-    # イースターエッグ　START
-    def __rpc(self, content):
-        '''ジャンケン
-            Args:
-                content:投稿内容
-            Returns:
-                result:結果
-        '''
-        result = ''
-        hand = random.randint(0, 2)
-        if 'グー' in content:
-            if hand == 0:
-                result = 'グー。あいこやわな。まぁそないじゃ、あきませんわ。話きいたるで。段取りが大事や。'
-            elif hand == 1:
-                result = 'チョキ。わしの負けやわな。まぁこんなん勝ったからってなんやって話や。そんなん言うたらあきません。エエ加減にせなあきません。'
-            elif hand == 2:
-                result = 'パー。わしの勝ちやわな。まぁ後出しやさかい、当たり前やわな。悩み聞いたるで。'
-
-        elif 'チョキ' in content:
-            if hand == 0:
-                result = 'グー。わしの勝ちやわな。後出ししたねん。そら勝つって話やわな。まぁもっと、頑張ったらえんちゃうか。'
-            elif hand == 1:
-                result = 'チョキ。あいこや。まぁワンカップ酒のせいや。'
-            elif hand == 2:
-                result = 'パー。わしの負けやわな。まぁだからなんやっちゅう話や。なんでも教えたる。'
-
-        elif 'パー' in content:
-            if hand == 0:
-                result = 'グー。わしの負けやわな。まぁバブルの頃から考えたら、なんでこんな公園でジャンケンしとるねんちゅう話やわな。'
-            elif hand == 1:
-                result = 'チョキ。わしの勝ちや。Good Job, Good Boyだね。'
-            elif hand == 2:
-                result = 'パー。あいこじゃ。少し黙れ。'
-
-        return result
-
     def __lottery(self):
         '''おみくじ
             Returns:
@@ -432,13 +382,12 @@ class Stream(StreamListener):
         result = ''
         lines = ''
 
-        lineCnt = len(open('/home/rosebud0707/apps/mastodonbots/NandemoOshieruKun/lottery.txt').readlines())
+        lineCnt = len(open(self.config.lottery_path).readlines())
 
         linePos = random.randint(1, lineCnt);
 
-        with open("/home/rosebud0707/apps/mastodonbots/NandemoOshieruKun/lottery.txt", "r") as f:
+        with open(self.config.lottery_path, "r") as f:
             lines = f.read().splitlines()
         
         result = lines[linePos]
         return result
-    # イースターエッグ　END
