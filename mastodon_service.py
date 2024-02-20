@@ -154,10 +154,8 @@ class Stream(StreamListener):
             content = ""
             if not html_data.find("span", class_='h-card'):
                 # Misskeyからのリプライ
-                if html_data.find("span") != None:
-                    con = html_data.find_all("span")
-                    for c in con:
-                        content += c.get_text()
+                if html_data.find("a").next_sibling != None:
+                    content = html_data.find("a").next_sibling
             else:
                 # Mastodonからのリプライ
                 if html_data.find("span").next_sibling != None:
